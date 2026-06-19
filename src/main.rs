@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/metrics", get(get_all_metrics))
         .route("/api/metrics/device/:device_id", get(get_device_metrics))
         .route("/api/metrics/device/:device_id/latest", get(get_latest_metric))
+        .route("/api/metrics/device/:device_id/hourly", get(get_hourly_aggregation))
         .with_state(state);
 
     let addr = std::env::var("BIND_ADDR")

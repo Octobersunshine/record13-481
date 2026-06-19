@@ -6,6 +6,7 @@ use axum::{
 use crate::db::Database;
 use crate::models::{
     ApiResponse, DeviceMetric, MetricListResponse, MetricRequest,
+    HourlyAggregationResponse, AggregationQuery,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -124,4 +125,40 @@ pub async fn health_check() -> (StatusCode, Json<ApiResponse<String>>) {
         StatusCode::OK,
         Json(ApiResponse::ok("服务运行正常".to_string())),
     )
+}
+
+pub async fn get_hourly_aggregation(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    Query(params): Query<AggregationQuery>,
+) -> (StatusCode, Json<ApiResponse<HourlyAggregationResponse>>) {
+    let hours = params.hours.unwrap_or(24);
+
+    if hours < 1 || hours > 720 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::error("小时数必须在 1 到 720 之间")),
+        );
+    }
+
+    match state.get_hourly_aggregation(&device_id, hours) {
+        Ok(aggregations) => {
+            let total_hours = aggregations.len() as i64;
+            (
+                StatusCode::OK,
+                Json(ApiResponse::ok(HourlyAggregationResponse {
+                    aggregations,
+                    device_id: device_id.clone(),
+                    total_hours,
+                })),
+            )
+        }
+        Err(e) => {
+            tracing::error!("查询小时聚合数据失败 [device_id={}]: {}", device_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse::error("查询小时聚合数据失败")),
+            )
+        }
+    }
 }

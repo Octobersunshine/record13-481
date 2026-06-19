@@ -1,9 +1,13 @@
 use anyhow::{Result, bail};
 use sled::Db;
-use crate::models::{DeviceMetric, MetricRequest, TEMPERATURE_MIN, TEMPERATURE_MAX, VOLTAGE_MIN, VOLTAGE_MAX};
-use chrono::Utc;
+use crate::models::{
+    DeviceMetric, MetricRequest, HourlyAggregation,
+    TEMPERATURE_MIN, TEMPERATURE_MAX, VOLTAGE_MIN, VOLTAGE_MAX,
+};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use uuid::Uuid;
 use std::sync::Arc;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct Database {
@@ -170,5 +174,98 @@ impl Database {
             }
             None => Ok(None),
         }
+    }
+
+    pub fn get_hourly_aggregation(
+        &self,
+        device_id: &str,
+        hours: i64,
+    ) -> Result<Vec<HourlyAggregation>> {
+        let hours = hours.max(1).min(720);
+        let now = Utc::now();
+        let start_time = now - Duration::hours(hours);
+
+        let prefix = format!("device:{}:", device_id);
+        let mut metrics = Vec::new();
+
+        for item in self.db.scan_prefix(prefix.as_bytes()) {
+            let (_, value) = item?;
+            let id_str = String::from_utf8_lossy(&value);
+            let metric_key = format!("metric:{}", id_str);
+
+            if let Some(metric_bytes) = self.db.get(metric_key.as_bytes())? {
+                let metric: DeviceMetric = serde_json::from_slice(&metric_bytes)?;
+                if metric.timestamp >= start_time {
+                    metrics.push(metric);
+                }
+            }
+        }
+
+        let mut hour_groups: HashMap<i64, Vec<&DeviceMetric>> = HashMap::new();
+
+        for metric in &metrics {
+            let hour_key = metric.timestamp.timestamp() / 3600;
+            hour_groups.entry(hour_key).or_default().push(metric);
+        }
+
+        let mut aggregations: Vec<HourlyAggregation> = Vec::new();
+
+        for (hour_key, group_metrics) in hour_groups {
+            let hour_start_timestamp = hour_key * 3600;
+            let hour = Utc.timestamp_opt(hour_start_timestamp, 0).single()
+                .unwrap_or_else(|| Utc.timestamp_opt(hour_start_timestamp, 0).unwrap());
+
+            let mut temp_sum = 0.0;
+            let mut temp_count = 0;
+            let mut temp_min = None;
+            let mut temp_max = None;
+
+            let mut volt_sum = 0.0;
+            let mut volt_count = 0;
+            let mut volt_min = None;
+            let mut volt_max = None;
+
+            for metric in &group_metrics {
+                if let Some(temp) = metric.temperature {
+                    temp_sum += temp;
+                    temp_count += 1;
+                    temp_min = Some(temp_min.map_or(temp, |m: f64| m.min(temp)));
+                    temp_max = Some(temp_max.map_or(temp, |m: f64| m.max(temp)));
+                }
+                if let Some(volt) = metric.voltage {
+                    volt_sum += volt;
+                    volt_count += 1;
+                    volt_min = Some(volt_min.map_or(volt, |m: f64| m.min(volt)));
+                    volt_max = Some(volt_max.map_or(volt, |m: f64| m.max(volt)));
+                }
+            }
+
+            let avg_temperature = if temp_count > 0 {
+                Some(temp_sum / temp_count as f64)
+            } else {
+                None
+            };
+
+            let avg_voltage = if volt_count > 0 {
+                Some(volt_sum / volt_count as f64)
+            } else {
+                None
+            };
+
+            aggregations.push(HourlyAggregation {
+                hour,
+                avg_temperature,
+                avg_voltage,
+                min_temperature: temp_min,
+                max_temperature: temp_max,
+                min_voltage: volt_min,
+                max_voltage: volt_max,
+                sample_count: group_metrics.len() as i64,
+            });
+        }
+
+        aggregations.sort_by(|a, b| a.hour.cmp(&b.hour));
+
+        Ok(aggregations)
     }
 }

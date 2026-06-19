@@ -142,3 +142,33 @@ pub struct MetricListResponse {
     pub metrics: Vec<DeviceMetric>,
     pub total: i64,
 }
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HourlyAggregation {
+    pub hour: DateTime<Utc>,
+    pub avg_temperature: Option<f64>,
+    pub avg_voltage: Option<f64>,
+    pub min_temperature: Option<f64>,
+    pub max_temperature: Option<f64>,
+    pub min_voltage: Option<f64>,
+    pub max_voltage: Option<f64>,
+    pub sample_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HourlyAggregationResponse {
+    pub aggregations: Vec<HourlyAggregation>,
+    pub device_id: String,
+    pub total_hours: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AggregationQuery {
+    pub hours: Option<i64>,
+}
+
+impl Default for AggregationQuery {
+    fn default() -> Self {
+        Self { hours: Some(24) }
+    }
+}
