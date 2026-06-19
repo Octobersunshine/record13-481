@@ -28,17 +28,15 @@ pub async fn submit_metric(
     State(state): State<AppState>,
     Json(metric): Json<MetricRequest>,
 ) -> (StatusCode, Json<ApiResponse<DeviceMetric>>) {
-    if metric.device_id.is_empty() {
+    if let Err(errors) = metric.validate() {
+        let err_msg = errors.iter()
+            .map(|e| format!("{}: {}", e.field, e.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+        tracing::warn!("指标校验失败 [device_id={}]: {}", metric.device_id, err_msg);
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error("设备ID不能为空")),
-        );
-    }
-
-    if metric.temperature.is_none() && metric.voltage.is_none() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error("温度和电压不能同时为空")),
+            Json(ApiResponse::validation_error("指标数据校验失败，存在异常脏数据", errors)),
         );
     }
 

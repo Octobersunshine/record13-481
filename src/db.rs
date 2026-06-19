@@ -1,6 +1,6 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use sled::Db;
-use crate::models::{DeviceMetric, MetricRequest};
+use crate::models::{DeviceMetric, MetricRequest, TEMPERATURE_MIN, TEMPERATURE_MAX, VOLTAGE_MIN, VOLTAGE_MAX};
 use chrono::Utc;
 use uuid::Uuid;
 use std::sync::Arc;
@@ -17,6 +17,29 @@ impl Database {
     }
 
     pub fn insert_metric(&self, request: &MetricRequest) -> Result<DeviceMetric> {
+        if let Some(temp) = request.temperature {
+            if temp.is_nan() || temp.is_infinite() {
+                bail!("DB安全校验拦截: 温度值无效（NaN或无限大）: {}", temp);
+            }
+            if temp < TEMPERATURE_MIN || temp > TEMPERATURE_MAX {
+                bail!(
+                    "DB安全校验拦截: 温度值超出合理范围 [{}, {}]，当前值: {}",
+                    TEMPERATURE_MIN, TEMPERATURE_MAX, temp
+                );
+            }
+        }
+        if let Some(volt) = request.voltage {
+            if volt.is_nan() || volt.is_infinite() {
+                bail!("DB安全校验拦截: 电压值无效（NaN或无限大）: {}", volt);
+            }
+            if volt < VOLTAGE_MIN || volt > VOLTAGE_MAX {
+                bail!(
+                    "DB安全校验拦截: 电压值超出合理范围 [{}, {}]，当前值: {}",
+                    VOLTAGE_MIN, VOLTAGE_MAX, volt
+                );
+            }
+        }
+
         let metric = DeviceMetric {
             id: Uuid::new_v4(),
             device_id: request.device_id.clone(),
